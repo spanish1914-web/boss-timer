@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>沙漠監控 PRO - 雲端版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0b0f1a; color: #cbd5e1; font-family: system-ui, sans-serif; padding-top: env(safe-area-inset-top); user-select: none; }
+        .boss-row { display: grid; grid-template-columns: 75px 1fr 1fr 1fr 1fr 35px; gap: 6px; align-items: center; }
+        @media (max-width: 640px) { .boss-row { grid-template-columns: 65px 1fr 1fr 1fr 1fr 30px; gap: 4px; } }
+        .cell { border: 1px solid #1e293b; border-radius: 10px; height: 75px; display: grid; grid-template-columns: 1fr 2fr 1fr; overflow: hidden; background: #161e2e; transition: 0.15s; }
+        .is-counting { background-color: #172554; border-color: #2563eb; }
+        .is-window { background-color: #422006; border-color: #b45309; }
+        .is-must { background-color: #450a0a; border-color: #dc2626; animation: pulse 2s infinite; }
+        .is-checked { border: 2px solid #fbbf24 !important; box-shadow: inset 0 0 10px rgba(251, 191, 36, 0.2); }
+        .zone { display: flex; align-items: center; justify-content: center; height: 100%; transition: background 0.1s; cursor: pointer; }
+        .zone:active { background: rgba(255,255,255,0.15); }
+        .zone-side { font-size: 16px; opacity: 0.5; }
+        .zone-mid { border-left: 1px solid rgba(255,255,255,0.05); border-right: 1px solid rgba(255,255,255,0.05); flex-direction: column; }
+        @keyframes pulse { 50% { opacity: 0.8; } }
+        .is-sticky { border-left: 5px solid #3b82f6; background-color: rgba(59, 130, 246, 0.1); }
+        .is-ready-row { border-left: 5px solid #ef4444; background-color: rgba(239, 68, 68, 0.1); }
+        .loot-item { @apply bg-slate-900/80 rounded-lg p-2 border border-slate-800 flex flex-col items-center justify-center; }
+        /* 雲端同步狀態燈 */
+        #sync-indicator { position: fixed; top: 10px; right: 10px; width: 8px; height: 8px; border-radius: 50%; background: #4ade80; opacity: 0; transition: opacity 0.5s; z-index: 100; }
+    </style>
+</head>
+<body class="p-2 md:p-4 pb-32">
+
+    <div id="sync-indicator"></div>
+
+    <div class="max-w-[1300px] mx-auto">
+        <header class="flex justify-between items-center mb-6 border-b border-slate-800 pb-3 px-2">
+            <div class="flex items-center gap-4">
+                <h1 class="text-xl font-black text-white italic tracking-tighter uppercase leading-none">Desert Boss <span class="text-blue-500 italic text-sm">PRO</span></h1>
+                <button onclick="openInput()" class="bg-blue-600 hover:bg-blue-500 w-10 h-10 rounded-full font-bold text-2xl active:scale-90 shadow-lg flex items-center justify-center">+</button>
+                <button onclick="clearChannelsOnly()" class="text-[10px] border border-red-900 px-3 py-1.5 rounded text-red-400 font-bold bg-red-950/20">一鍵取消頻道</button>
+            </div>
+            <div class="text-[11px] text-right text-slate-500 font-bold leading-tight">
+                按 <kbd class="bg-slate-800 px-1 rounded text-white font-mono text-[14px]">+</kbd> 新增<br>
+                📍踩點 | ⚡擊殺 | ✕補時
+            </div>
+        </header>
+
+        <div id="timer-container" class="space-y-3"></div>
+    </div>
+
+    <div class="fixed bottom-0 left-0 right-0 bg-black/95 border-t border-slate-800 p-2 z-40 backdrop-blur-md">
+        <div class="max-w-[1300px] mx-auto space-y-2">
+            <div class="grid grid-cols-4 gap-2 text-[11px] font-bold">
+                <div class="text-center bg-slate-800/50 py-1.5 rounded uppercase">紅藍: <span id="kill-0" class="text-blue-400">0</span></div>
+                <div class="text-center bg-slate-800/50 py-1.5 rounded uppercase">奇美: <span id="kill-1" class="text-blue-400">0</span></div>
+                <div class="text-center bg-slate-800/50 py-1.5 rounded uppercase">警備: <span id="kill-2" class="text-blue-400">0</span></div>
+                <div class="text-center bg-slate-800/50 py-1.5 rounded uppercase">迪特: <span id="kill-3" class="text-blue-400">0</span></div>
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+                <div class="loot-item text-yellow-500"><span class="text-[9px] opacity-60 uppercase">金袋總計</span><span id="gold-total" class="text-xl font-black">0</span></div>
+                <div class="loot-item text-slate-300"><span class="text-[9px] opacity-60 uppercase">銀袋總計</span><span id="silver-total" class="text-xl font-black">0</span></div>
+                <div class="loot-item text-orange-400"><span class="text-[9px] opacity-60 uppercase">銅袋總計</span><span id="bronze-total" class="text-xl font-black">0</span></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CLOUD_API = "https://script.google.com/macros/s/AKfycbyo-hYDOjl4-Uh7yhxtGoQ0hwZySNxtyrfqZS1BqLCR924aC9oKuWqbB6-AX3sX2Xnd/exec";
+        const BOSS = [
+            { name: "紅藍", min: 113, max: 135, loot: {g:1, s:0, b:0} },
+            { name: "奇美", min: 120, max: 135, loot: {g:1, s:1, b:0} },
+            { name: "警備", min: 158, max: 173, loot: {g:1, s:1, b:1} },
+            { name: "迪特", min: 150, max: 165, loot: {g:1, s:1, b:1} }
+        ];
+
+        let state = JSON.parse(localStorage.getItem('artale_cloud_final')) || {
+            channels: [], stats: [0,0,0,0], stickyId: null
+        };
+
+        // --- 強化鍵盤監聽 ---
+        window.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.key === '+' || e.key === '=' || e.key === 'Add' || e.keyCode === 187 || e.keyCode === 107) {
+                e.preventDefault();
+                openInput();
+            }
+        }, true);
+
+        async function pullFromCloud() {
+            try {
+                const res = await fetch(CLOUD_API);
+                const data = await res.text();
+                if (data && data !== "OK" && data !== "") {
+                    state = JSON.parse(data);
+                    save(false); // 僅更新本地，不反向觸發上傳
+                    render();
+                }
+            } catch (e) { console.error("Cloud Pull Error", e); }
+        }
+
+        async function pushToCloud() {
+            const indicator = document.getElementById('sync-indicator');
+            indicator.style.opacity = "1";
+            try {
+                await fetch(CLOUD_API, {
+                    method: 'POST',
+                    mode: 'no-cors', // 解決 Google Apps Script CORS 問題
+                    body: JSON.stringify(state)
+                });
+                setTimeout(() => indicator.style.opacity = "0", 1000);
+            } catch (e) { console.error("Cloud Push Error", e); }
+        }
+
+        function openInput() {
+            setTimeout(() => {
+                let val = prompt("請輸入頻道數字 (CH):");
+                if(val && val.trim() !== "") {
+                    if(!state.channels.find(c => c.id === val)) {
+                        state.channels.push({ id: val, times: [null,null,null,null], checks: [null,null,null,null] });
+                    }
+                    state.stickyId = val;
+                    save(); render();
+                }
+            }, 50);
+        }
+
+        function clearChannelsOnly() {
+            if(confirm("確定要取消所有頻道監控嗎？(擊殺統計會保留)")) {
+                state.channels = [];
+                state.stickyId = null;
+                save(); render();
+            }
+        }
+
+        function handleKill(chId, idx) {
+            const ch = state.channels.find(c => c.id === chId);
+            state.stickyId = chId;
+            ch.times[idx] = Date.now();
+            ch.checks[idx] = null;
+            state.stats[idx]++;
+            save(); render();
+        }
+
+        function handleCheck(chId, idx) {
+            const ch = state.channels.find(c => c.id === chId);
+            state.stickyId = chId;
+            ch.checks[idx] = ch.checks[idx] ? null : Date.now();
+            save(); render();
+        }
+
+        function handleDelete(chId, idx) {
+            const ch = state.channels.find(c => c.id === chId);
+            if (!ch) return;
+            state.stickyId = chId;
+            if (ch.checks[idx] && ch.times[idx]) {
+                ch.times[idx] = ch.times[idx] + (BOSS[idx].min * 60000);
+            } else {
+                ch.times[idx] = null;
+            }
+            ch.checks[idx] = null;
+            save(); render();
+        }
+
+        function save(push = true) {
+            localStorage.setItem('artale_cloud_final', JSON.stringify(state));
+            if (push) pushToCloud();
+        }
+
+        function getPriority(ch, now) {
+            if (ch.id === state.stickyId) return -2000000;
+            let minTimeLeft = Infinity;
+            let hasReady = false;
+            ch.times.forEach((kt, i) => {
+                if (kt) {
+                    const elM = (now - kt) / 60000;
+                    if (elM >= BOSS[i].min) hasReady = true;
+                    else minTimeLeft = Math.min(minTimeLeft, BOSS[i].min - elM);
+                }
+            });
+            if (hasReady) return -1000000;
+            return minTimeLeft === Infinity ? 1000000 : minTimeLeft;
+        }
+
+        function render() {
+            const container = document.getElementById('timer-container');
+            const now = Date.now();
+            state.channels.sort((a, b) => getPriority(a, now) - getPriority(b, now));
+
+            let html = '';
+            state.channels.forEach(ch => {
+                const pri = getPriority(ch, now);
+                const isSticky = ch.id === state.stickyId;
+                const isReady = pri === -1000000;
+                html += `<div class="boss-row bg-slate-900/50 p-2 rounded-xl border border-slate-800 ${isSticky ? 'is-sticky' : (isReady ? 'is-ready-row' : '')}">
+                    <div class="text-xl font-black text-center font-mono ${isSticky ? 'text-blue-400' : 'text-slate-500'}">CH ${ch.id}</div>`;
+                ch.times.forEach((kt, i) => {
+                    const b = BOSS[i];
+                    const check = ch.checks[i];
+                    let cls = "text-slate-600", main = "存活", sub = b.name;
+                    if (kt) {
+                        const elM = (now - kt) / 60000;
+                        if (elM < b.min) {
+                            cls = "is-counting text-blue-400";
+                            main = `-${Math.floor(b.min - elM)}m`;
+                            sub = new Date(kt + b.min * 60000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+                        } else {
+                            cls = elM >= b.max ? "is-must text-red-400" : "is-window text-yellow-500";
+                            main = "已重生";
+                            sub = `+${Math.floor(elM - b.min)}m`;
+                        }
+                    }
+                    html += `<div class="cell ${cls} ${check ? 'is-checked' : ''}">
+                        <div onclick="handleCheck('${ch.id}', ${i})" class="zone zone-side text-yellow-500">📍</div>
+                        <div onclick="handleKill('${ch.id}', ${i})" class="zone zone-mid"><span class="text-base font-black leading-none">${main}</span><span class="text-[9px] font-bold opacity-60 mt-1 uppercase">${sub}</span></div>
+                        <div onclick="handleDelete('${ch.id}', ${i})" class="zone zone-side text-red-500">✕</div>
+                    </div>`;
+                });
+                html += `<button onclick="removeCH('${ch.id}')" class="text-slate-800 text-sm p-1">✕</button></div>`;
+            });
+            container.innerHTML = html || '<p class="text-center opacity-30 py-20 font-bold uppercase tracking-widest">沙漠監控已就緒</p>';
+            updateLoot();
+        }
+
+        function updateLoot() {
+            let g=0, s=0, b=0;
+            state.stats.forEach((count, i) => {
+                g += count * BOSS[i].loot.g;
+                s += count * BOSS[i].loot.s;
+                b += count * BOSS[i].loot.b;
+                document.getElementById(`kill-${i}`).innerText = count;
+            });
+            document.getElementById('gold-total').innerText = g;
+            document.getElementById('silver-total').innerText = s;
+            document.getElementById('bronze-total').innerText = b;
+        }
+
+        function removeCH(id) {
+            state.channels = state.channels.filter(c => c.id !== id);
+            if(state.stickyId === id) state.stickyId = null;
+            save(); render();
+        }
+
+        // 初始載入
+        window.onload = async () => {
+            await pullFromCloud(); // 開啟網頁自動抓雲端
+            render();
+            // 每 30 秒自動從雲端同步一次，確保多裝置同步
+            setInterval(pullFromCloud, 30000);
+        };
+
+        setInterval(render, 1000);
+    </script>
+</body>
+</html>
