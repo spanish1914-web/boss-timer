@@ -66,15 +66,14 @@
         const BOSS = [
             { name: "紅藍", min: 113, max: 135, loot: {g:1, s:0, b:0} },
             { name: "奇美", min: 120, max: 135, loot: {g:1, s:1, b:0} },
-            { name: "警備", min: 158, max: 173, loot: {g:1, s:1, b:2} }, // 修正：銅*2
-            { name: "迪特", min: 150, max: 165, loot: {g:1, s:1, b:3} }  // 修正：銅*3
+            { name: "警備", min: 158, max: 173, loot: {g:1, s:1, b:2} },
+            { name: "迪特", min: 150, max: 165, loot: {g:1, s:1, b:3} }
         ];
 
         let state = JSON.parse(localStorage.getItem('artale_cloud_final')) || {
             channels: [], stats: [0,0,0,0], stickyId: null
         };
 
-        // 鍵盤監聽強化
         window.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
             if (e.key === '+' || e.key === '=' || e.key === 'Add' || e.keyCode === 187 || e.keyCode === 107) {
@@ -195,14 +194,26 @@
                     let cls = "text-slate-600", main = "存活", sub = b.name;
                     if (kt) {
                         const elM = (now - kt) / 60000;
-                        if (elM < b.min) {
+                        const minM = b.min;
+                        const maxM = b.max;
+
+                        if (elM < minM) {
+                            // 藍色：等待重生
                             cls = "is-counting text-blue-400";
-                            main = `-${Math.floor(b.min - elM)}m`;
-                            sub = new Date(kt + b.min * 60000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+                            const rem = minM - elM;
+                            main = `-${Math.floor(rem)}m`;
+                            sub = new Date(kt + minM * 60000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+                        } else if (elM >= minM && elM < maxM) {
+                            // 黃色：重生區間（可能重生）
+                            cls = "is-window text-yellow-500";
+                            const remMax = maxM - elM;
+                            main = `-${Math.floor(remMax)}m`; // 顯示距離確定重生的倒數
+                            sub = "可能重生";
                         } else {
-                            cls = elM >= b.max ? "is-must text-red-400" : "is-window text-yellow-500";
-                            main = "已重生";
-                            sub = `+${Math.floor(elM - b.min)}m`;
+                            // 紅色：已超過必出時間（已重生）
+                            cls = "is-must text-red-400";
+                            main = `+${Math.floor(elM - maxM)}m`; // 顯示超過必出時間多久
+                            sub = "已重生";
                         }
                     }
                     html += `<div class="cell ${cls} ${check ? 'is-checked' : ''}">
@@ -246,3 +257,4 @@
     </script>
 </body>
 </html>
+
